@@ -1,13 +1,13 @@
 <?php
 /**
- * BBCode plugin: allows BBCode markup familiar from forum software
- * 
+ * @file       bbcode/syntax/color.php
+ * @brief      Color formatting support for BBCode Plugin
  * @license    GPL 2 (http://www.gnu.org/licenses/gpl.html)
  * @author     Esther Brunner <esther@kaffeehaus.ch>
  * @author     Christopher Smith <chris@jalakai.co.uk>
  * @author     Luis Machuca Bezzaza <luis.machuca@gulix.cl>
+ * @version    2011-05-25
  */
- 
 if(!defined('DOKU_INC')) define('DOKU_INC',realpath(dirname(__FILE__).'/../../').'/');
 if(!defined('DOKU_PLUGIN')) define('DOKU_PLUGIN',DOKU_INC.'lib/plugins/');
 require_once(DOKU_PLUGIN.'syntax.php');
@@ -18,6 +18,27 @@ require_once(DOKU_PLUGIN.'syntax.php');
  */
 class syntax_plugin_bbcode_color extends DokuWiki_Syntax_Plugin {
 
+    static $htmlcolors = array (
+        'red' => '#ff0000',
+        'green' => '#008000',
+        'blue' => '#0000ff',
+        'aqua' => '#00ffff',
+        'cyan' => '#00ffff',
+        'fuchsia' => '#ff00ff',
+        'lime' => '#00ff00',
+        'magenta' => '#ff00ff',
+        'maroon' => '#800000',
+        'navy' => '#000080',
+        'olive' => '#808000',
+        'purple' => '#800080',
+        'teal' => '#008080',
+        'yellow' => '#ffff00',
+        'black' => '#000000',
+        'gray' => '#808080',
+        'grey' => '#808080',
+        'silver' => '#c0c0c0',
+        'white' => '#ffffff',
+        );
     static $browsercolors = array (
             'aliceblue' => '#f0f8ff' ,
             'antiquewhite' => '#faebd7' ,
@@ -160,13 +181,13 @@ class syntax_plugin_bbcode_color extends DokuWiki_Syntax_Plugin {
             'yellow' => '#ffff00' ,
             'yellowgreen' => '#9acd32' ,
             );
- 
+
     function getType() { return 'formatting'; }
     function getAllowedTypes() { return array('formatting', 'substition', 'disabled'); }   
     function getSort() { return 105; }
     function connectTo($mode) { $this->Lexer->addEntryPattern('\[color=.*?\](?=.*?\x5B/color\x5D)',$mode,'plugin_bbcode_color'); }
     function postConnect() { $this->Lexer->addExitPattern('\[/color\]','plugin_bbcode_color'); }
- 
+
     /**
      * Handle the match
      */
@@ -176,61 +197,103 @@ class syntax_plugin_bbcode_color extends DokuWiki_Syntax_Plugin {
             $match = substr($match, 7, -1);
             if (preg_match('/".+?"/',$match)) $match = substr($match, 1, -1); // addition #1: unquote
             return array($state, $match);
- 
           case DOKU_LEXER_UNMATCHED :
             return array($state, $match);
-            
           case DOKU_LEXER_EXIT :
             return array($state, '');
-            
         }
         return array();
     }
- 
+
     /**
      * Create output
      */
     function render($mode, &$renderer, $data) {
+        list($state, $match) = $data;
         if($mode == 'xhtml') {
-            list($state, $match) = $data;
             switch ($state) {
-              case DOKU_LEXER_ENTER :      
-                if ($match = $this->_isValid($match)) {
-                    $renderer->doc .= '<span style="color:'. $match. '">'; // addition #2: SVG browser colors
+              case DOKU_LEXER_ENTER :
+                $mvalid= $this->_isValid($match);
+                echo "<pre> { ${match} =&gt; ${mvalid} } </pre>";
+                if ($mvalid) {
+                    // the class isn't needed, but in case someone needs to do something with color...
+                    $renderer->doc .= '<span class="bbcode_color" style="color:'. $match. '">';
                 } else {
                     $renderer->doc .= '<span>';
                 }
                 break;
-                
               case DOKU_LEXER_UNMATCHED :
                 $renderer->doc .= $renderer->_xmlEntities($match);
                 break;
-                
               case DOKU_LEXER_EXIT :
                 $renderer->doc .= '</span>';
                 break;
-                
+            }
+            return true;
+        }
+        else if($mode == 'odt') {
+            switch ($state) {
+              case DOKU_LEXER_ENTER :
+                $mvalid= $this->_isValid($match);
+                // non-#rrggbb tuples shall not pass!
+                if ($mvalid[0]==='#') {
+                    $mname= substr($mvalid,1);
+                    // add the autostyle if it's not already available
+                    $stylename= "bbcode_color_${mname}";
+                    if (!array_key_exists($stylename, $renderer->autostyles)) {
+                        $renderer->autostyles[$stylename]= '
+            <style:style style:name="'.$stylename.'" style:display-name="BBCode Color '.$mvalid.'" style:family="text">
+                <style:text-properties fo:color="'.$mvalid.'"/>
+            </style:style>';
+                    }
+                    $renderer->doc .= '<text:span text:style-name="'.$stylename.'">';
+                } else {
+                    $renderer->doc .= '<text:span>';
+                }
+                break;
+              case DOKU_LEXER_UNMATCHED :
+                $renderer->doc .= $renderer->_xmlEntities($match);
+                break;
+              case DOKU_LEXER_EXIT :
+                $renderer->doc .= '</text:span>';
+                break;
             }
             return true;
         }
         return false;
     }
-    
-    // validate color value $c
-    // this is cut price validation - only to ensure the basic format is correct and there is nothing harmful
-    // three basic formats  "colorname", "#fff[fff]", "rgb(255[%],255[%],255[%])"
+
+
+    /**
+     * Validate color
+     * 
+     * This is a moderalety strong validation -- first it ensures that the 
+     * format is correct and there is nothing harmful, then returns 
+     * a convenient form of its argument.
+     */
     function _isValid($c) {
         $c = trim($c);
-        
-        $pattern = "/
-            ([a-zA-z]+)|                                #colorname - not verified
-            (\#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}))|        #colorvalue
-            (rgb\(([0-9]{1,3}%?,){2}[0-9]{1,3}%?\))     #rgb triplet
-            /x";
-        
+        $pattern= "/^(\#[0-9a-fA-F]{6})$/x";
+        if (preg_match($pattern,$c)) return $c;
+        // stretch a #rgb tuple to the form #rrggbb
+        $pattern= "/^(\#[0-9a-fA-F]{3})$/x";
+        if (preg_match($pattern,$c)) {
+            list($hash,$R,$G,$B) = str_split($c);
+            return "#$R$R$G$G$B$B";
+        }
+        // return rgb() and hsl() formulas as-is
+        // TODO: return rgba() and hsla() too?
+        $pattern = "/^
+            (rgb\(([0-9]{1,3}%?,){2}[0-9]{1,3}%?\))|      # rgb triplet
+            (hsl\([0-9]+,(100|[0-9][0-9]?)%,(100|[0-9][0-9])%\))  #hsl triplet
+            $/x";
         if (preg_match($pattern, $c)) return $c;
-        if (!empty($this->browsercolors[$c])) return $this->browsercolors[$c]; 
-        return "";
+        // return lowercase HTML colornames as-is
+        if (ctype_lower($c) && !empty(self::$htmlcolors[$c])) return self::$htmlcolors[$c]; 
+        // demans CamelCase SVG colornames for easier distinction
+        $d= strtolower($c);
+        if (ctype_upper($c[0]) && !empty(self::$browsercolors[$d])) return self::$browsercolors[$d];
+        // at this point we weren't handed over something usable
+        return false;
     }
 }
-// vim:ts=4:sw=4:et:enc=utf-8:     
